@@ -1,0 +1,367 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#6B2E0E">
+<title>Noor Bakery – Halal, Enak dan Berkah</title>
+<link href="https://fonts.googleapis.com/css2?family=Young+Serif&family=DM+Sans:wght@400;500;700&display=swap" rel="stylesheet">
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://accounts.google.com/gsi/client" async defer onload="renderG()"></script>
+<script>
+tailwind.config={theme:{extend:{colors:{brown:'#6B2E0E',gold:'#F0A93A',cream:'#FFF7E6',mustard:'#E9A21B',ink:'#2B1A10'},fontFamily:{serif:['"Young Serif"','Georgia','serif'],sans:['"DM Sans"','system-ui','sans-serif']}}}}
+</script>
+<style>
+body{background:#FFF7E6;color:#2B1A10;padding-bottom:env(safe-area-inset-bottom,0)}
+.inp{width:100%;border:1.5px solid #E6CDA5;border-radius:12px;padding:10px 12px;background:#fff;font-size:16px}
+.inp:focus{outline:3px solid #F0A93A;border-color:#F0A93A}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;border-radius:999px;padding:11px 20px;font-weight:700;background:#6B2E0E;color:#FFF7E6;transition:opacity .15s}
+.btn:disabled{opacity:.55}.btn.gold{background:#F0A93A;color:#2B1A10}.btn.line{background:transparent;border:2px solid #6B2E0E;color:#6B2E0E}.btn.sm{padding:6px 14px;font-size:14px}
+.card{background:#fff;border-radius:18px;padding:14px;box-shadow:0 1px 0 #EBD7B5}
+.chip{padding:6px 14px;border-radius:999px;border:1.5px solid #E6CDA5;white-space:nowrap;font-size:14px;background:#fff}.chip.on{background:#6B2E0E;color:#FFF7E6;border-color:#6B2E0E}
+.sk{background:linear-gradient(90deg,#f1e2c4,#fbf0da,#f1e2c4);background-size:200% 100%;animation:sk 1.2s infinite;border-radius:16px}@keyframes sk{to{background-position:-200% 0}}
+@media(prefers-reduced-motion:reduce){.sk{animation:none}}
+:focus-visible{outline:3px solid #F0A93A;outline-offset:2px}
+@media print{body *{visibility:hidden}.struk,.struk *{visibility:visible}.struk{position:absolute;left:0;top:0;width:58mm;font-size:11px}}
+</style>
+</head>
+<body class="font-sans">
+<div id="app" class="max-w-3xl mx-auto px-4 pb-28"></div>
+<nav id="nav"></nav>
+<div id="modal"></div>
+<div id="toast" class="fixed left-0 right-0 top-3 z-[60] flex flex-col items-center gap-2 pointer-events-none px-4"></div>
+
+<script>
+/* ========== 1. KONFIGURASI API ========== */
+const GAS_URL = "https://script.google.com/macros/s/AKfycbzUDnRrSnDAw2ZQWrWG3_HjWt1FAsD-mwxc5ZLk3RCeP9UqsZsLQTC8qBasHCvnmU1F0w/exec";
+
+/* ========== 2. UTIL & STATE ========== */
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const rp = n => 'Rp' + Number(n || 0).toLocaleString('id-ID');
+const ls = {get(k,d){try{const v=JSON.parse(localStorage.getItem(k));return v===null?d:v}catch(e){return d}},set(k,v){try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}}};
+const dstr = d => d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+const today = (n=0) => { const d=new Date(); d.setDate(d.getDate()+n); return dstr(d); };
+const img = u => { if(!u) return ''; const m=String(u).match(/\/d\/([\w-]+)/)||String(u).match(/[?&]id=([\w-]+)/); return m?'https://drive.google.com/thumbnail?id='+m[1]+'&sz=w600':u; };
+const S = { view:'home', pub:null, err:'', cart:ls.get('cart',{}), tm:ls.get('tm',''), ts:ls.get('ts',''), member:ls.get('member',null), staff:ls.get('staff',null),
+  mode:'langsung', cat:'Semua', gtok:'', reg:null, done:null, status:null, orders:null,
+  adm:{tab:'pesanan',data:null,fs:'',q:'',tgl:today()}, pos:{list:null,q:'',cart:{},cust:null,metode:'Tunai',diskon:0,diterima:0,tab:'kasir',riwayat:null} };
+const ST_CLS = {Baru:'bg-blue-100 text-blue-800',Diproses:'bg-amber-100 text-amber-800',Siap:'bg-green-100 text-green-800',Selesai:'bg-stone-200 text-stone-700',Batal:'bg-red-100 text-red-700'};
+
+/* ========== 3. API SERVICE ========== */
+async function getPublic(){ const r=await fetch(GAS_URL+'?action=getPublic'); const j=await r.json(); if(j.status!=='success') throw new Error(j.message); return j.data; }
+async function api(action, payload={}, kind){
+  const token = kind==='m' ? S.tm : kind==='s' ? S.ts : '';
+  const r = await fetch(GAS_URL, { method:'POST', body: JSON.stringify({action, token, payload}) });
+  const j = await r.json();
+  if(j.status!=='success'){
+    if(/Sesi berakhir/.test(j.message)){ if(kind==='s') logoutStaff(true); if(kind==='m') logoutMember(true); }
+    throw new Error(j.message);
+  }
+  return j.data;
+}
+
+/* ========== 4. UI HELPER (toast, modal, tombol sibuk) ========== */
+function toast(msg, type){
+  const el=document.createElement('div');
+  el.className='pointer-events-auto rounded-full px-4 py-2 text-sm font-medium shadow-lg '+(type==='err'?'bg-red-700 text-white':'bg-brown text-cream');
+  el.setAttribute('role','status'); el.textContent=msg; $('#toast').appendChild(el); setTimeout(()=>el.remove(),3500);
+}
+async function busy(btn, fn, txt){
+  const old=btn.innerHTML; btn.disabled=true; btn.textContent=txt||'Menyimpan...';
+  try{ await fn(); }catch(e){ toast(e.message,'err'); }finally{ if(btn.isConnected){btn.disabled=false;btn.innerHTML=old;} }
+}
+function modal(html){ $('#modal').innerHTML='<div class="fixed inset-0 z-50 bg-black/50 flex items-end sm:items-center justify-center" data-act="mbg"><div class="bg-cream w-full sm:max-w-lg max-h-[92vh] overflow-y-auto rounded-t-3xl sm:rounded-3xl p-5" role="dialog" aria-modal="true">'+html+'</div></div>'; }
+function closeModal(){ $('#modal').innerHTML=''; }
+function ask(msg, okText){ return new Promise(res=>{ modal('<p class="mb-4">'+esc(msg)+'</p><div class="flex gap-2 justify-end"><button class="btn line sm" data-act="ask" data-v="0">Batal</button><button class="btn sm" data-act="ask" data-v="1">'+esc(okText||'Ya')+'</button></div>'); window._ask=res; }); }
+const skel = n => '<div class="grid gap-3 mt-4">'+Array.from({length:n},()=>'<div class="sk h-24"></div>').join('')+'</div>';
+const empty = (t,s) => '<div class="text-center py-10 text-stone-500"><div class="text-4xl mb-2">🥖</div><p class="font-medium text-ink">'+esc(t)+'</p><p class="text-sm">'+esc(s||'')+'</p></div>';
+const fd = f => { const o={}; new FormData(f).forEach((v,k)=>o[k]=v); return o; };
+
+/* ========== 5. KERANJANG ========== */
+const prod = id => (S.pub?S.pub.produk:[]).find(p=>p.id_produk===id);
+function cartItems(){ return Object.keys(S.cart).map(id=>({p:prod(id),qty:S.cart[id]})).filter(x=>x.p); }
+const cartTotal = () => cartItems().reduce((a,x)=>a+x.qty*Number(x.p.harga),0);
+const cartCount = () => cartItems().reduce((a,x)=>a+x.qty,0);
+function addCart(id, d){
+  const p=prod(id); if(!p) return; const cur=S.cart[id]||0; let q=cur+d;
+  if(p.tipe==='tempahan'){ const mn=Math.max(1,Number(p.min_order)||1); if(d>0&&!cur) q=mn; if(d<0&&q<mn) q=0; }
+  else if(q>Number(p.stok)){ toast('Stok '+p.nama+' tinggal '+p.stok,'err'); return; }
+  if(q<=0) delete S.cart[id]; else S.cart[id]=q;
+  ls.set('cart',S.cart); render();
+}
+const qtyCtl = (p) => {
+  const q=S.cart[p.id_produk]||0;
+  if(p.tipe==='ready'&&Number(p.stok)<=0) return '<span class="text-sm text-red-700 font-medium">Habis</span>';
+  return q ? '<div class="flex items-center gap-2"><button class="btn sm" aria-label="Kurangi" data-act="cart" data-id="'+p.id_produk+'" data-d="-1">−</button><b>'+q+'</b><button class="btn sm" aria-label="Tambah" data-act="cart" data-id="'+p.id_produk+'" data-d="1">+</button></div>'
+    : '<button class="btn gold sm" data-act="cart" data-id="'+p.id_produk+'" data-d="1">Tambah</button>';
+};
+
+/* ========== 6. DOM RENDERERS: PUBLIK ========== */
+function prodCard(p){
+  const tp = p.tipe==='tempahan';
+  return '<div class="card flex gap-3"><div class="w-24 h-24 shrink-0 rounded-xl bg-[#F6E3BE] overflow-hidden flex items-center justify-center text-3xl">'+(p.foto_url?'<img src="'+esc(img(p.foto_url))+'" alt="'+esc(p.nama)+'" class="w-full h-full object-cover" loading="lazy">':'🥐')+'</div>'
+  +'<div class="flex-1 min-w-0"><h3 class="font-serif text-lg leading-tight">'+esc(p.nama)+'</h3><p class="text-sm text-stone-600 line-clamp-2">'+esc(p.deskripsi)+'</p>'
+  +(tp?'<p class="text-xs text-brown mt-1">Tempahan · min '+esc(p.min_order)+' '+esc(p.satuan)+' · pesan H-'+esc(p.lead_time_hari)+'</p>':'')
+  +'<div class="flex items-center justify-between mt-2"><b>'+rp(p.harga)+'</b>'+qtyCtl(p)+'</div></div></div>';
+}
+function viewHome(){
+  if(S.err) return '<div class="py-16 text-center"><p class="mb-3">'+esc(S.err)+'</p><button class="btn" data-act="reload">Coba lagi</button></div>';
+  if(!S.pub) return '<div class="sk h-64 mt-4"></div>'+skel(3);
+  const P=S.pub, H=P.halaman||{};
+  const cats=['Semua',...new Set(P.produk.map(p=>p.kategori).filter(Boolean))];
+  const list=P.produk.filter(p=>S.cat==='Semua'||p.kategori===S.cat);
+  const tmp=P.produk.filter(p=>p.tipe==='tempahan');
+  const wa=n=>H[n]?'<a class="btn gold sm" target="_blank" rel="noopener" href="https://wa.me/'+esc(H[n])+'">WhatsApp '+esc(String(H[n]).replace(/^62/,'0'))+'</a>':'';
+  return '<header class="flex items-center justify-between py-4"><div class="flex items-center gap-2">'+(H.logo_url?'<img src="'+esc(img(H.logo_url))+'" alt="Noor Bakery" class="h-10">':'<span class="font-serif text-2xl text-brown">Noor Bakery</span>')+'</div><a href="#/staff" class="text-xs text-stone-500 underline">Admin / Kasir</a></header>'
+  +'<section class="rounded-3xl bg-brown text-cream p-6 mt-1"><p class="text-gold font-medium">'+esc(H.tagline)+'</p><h1 class="font-serif text-3xl sm:text-4xl leading-tight mt-2">'+esc(H.hero_judul)+'</h1><p class="mt-3 opacity-90 max-w-md">'+esc(H.hero_teks)+'</p><a href="#menu" class="btn gold mt-5" data-act="goto" data-to="menu">'+esc(H.hero_tombol||'Pesan sekarang')+'</a></section>'
+  +'<section id="menu" class="mt-8"><h2 class="font-serif text-2xl mb-3">Menu</h2><div class="flex gap-2 overflow-x-auto pb-2">'+cats.map(c=>'<button class="chip '+(S.cat===c?'on':'')+'" data-act="cat" data-c="'+esc(c)+'">'+esc(c)+'</button>').join('')+'</div>'
+  +'<div class="grid gap-3 mt-2 sm:grid-cols-2">'+(list.length?list.map(prodCard).join(''):'<div class="sm:col-span-2">'+empty('Belum ada produk','Coba kategori lain.')+'</div>')+'</div></section>'
+  +(tmp.length?'<section class="mt-8 rounded-3xl bg-mustard/30 p-5"><h2 class="font-serif text-2xl">Terima tempahan</h2><p class="text-sm mb-3">Snack Box dan Cake Ultah. Pesan beberapa hari sebelumnya.</p><div class="grid gap-3 sm:grid-cols-2">'+tmp.map(prodCard).join('')+'</div></section>':'')
+  +'<section class="mt-8"><h2 class="font-serif text-2xl">'+esc(H.cerita_judul)+'</h2><p class="mt-2 text-stone-700 max-w-prose">'+esc(H.cerita_isi)+'</p></section>'
+  +(P.galeri.length?'<section class="mt-8"><h2 class="font-serif text-2xl mb-3">Galeri</h2><div class="grid grid-cols-2 gap-2">'+P.galeri.map(g=>'<figure><img src="'+esc(img(g.foto_url))+'" alt="'+esc(g.judul)+'" class="rounded-2xl aspect-square object-cover w-full" loading="lazy"></figure>').join('')+'</div></section>':'')
+  +(P.testimoni.length?'<section class="mt-8"><h2 class="font-serif text-2xl mb-3">Kata pelanggan</h2><div class="grid gap-3 sm:grid-cols-2">'+P.testimoni.map(t=>'<blockquote class="card text-sm">“'+esc(t.isi)+'”<footer class="mt-2 font-medium">'+esc(t.nama)+'</footer></blockquote>').join('')+'</div></section>':'')
+  +'<section class="mt-8 card"><h2 class="font-serif text-2xl mb-2">Kunjungi kami</h2><p>'+esc(H.alamat)+'</p><p class="text-sm text-stone-600 mt-1">'+esc(H.jam_buka)+'</p><div class="flex flex-wrap gap-2 mt-3">'+(H.maps_url?'<a class="btn line sm" target="_blank" rel="noopener" href="'+esc(H.maps_url)+'">Buka Google Maps</a>':'')+wa('wa_1')+wa('wa_2')+'</div></section>'
+  +'<p class="text-center text-xs text-stone-500 mt-8">© Noor Bakery · Halal, Enak dan Berkah</p>';
+}
+
+function memberBox(){
+  if(S.tm && S.member) return '<div class="card"><p class="text-sm text-stone-600">Masuk sebagai member</p><p class="font-bold">'+esc(S.member.nama)+'</p><p class="text-sm">'+esc(S.member.no_wa)+'</p></div>';
+  if(S.reg) return '<form class="card grid gap-3" data-form="register"><p class="font-bold">Lengkapi pendaftaran member</p><p class="text-sm text-stone-600">'+esc(S.reg.email)+'</p>'
+    +'<label class="text-sm">Nama<input class="inp" name="nama" required value="'+esc(S.reg.nama)+'"></label><label class="text-sm">Nomor WhatsApp<input class="inp" name="no_wa" inputmode="tel" required placeholder="0812xxxxxxx"></label><label class="text-sm">Alamat (opsional)<input class="inp" name="alamat"></label><button class="btn" type="submit">Daftar member</button></form>';
+  return '<div class="card"><p class="font-bold mb-1">Login atau daftar member</p><p class="text-sm text-stone-600 mb-3">Gunakan akun Google. Pendaftar baru mengisi nomor WhatsApp setelah login.</p><div id="gbtn"></div></div>';
+}
+
+function viewPesan(){
+  if(S.done){
+    const H=(S.pub&&S.pub.halaman)||{}, d=S.done;
+    const msg=encodeURIComponent('Halo Noor Bakery, saya sudah memesan dengan nomor '+d.id_pesanan+' (total '+rp(d.total)+').');
+    return '<div class="py-10 text-center"><div class="text-5xl mb-3">✅</div><h1 class="font-serif text-3xl">Pesanan terkirim</h1><p class="mt-2">Nomor pesanan Anda</p><p class="font-bold text-2xl text-brown my-1">'+esc(d.id_pesanan)+'</p><p>Total '+rp(d.total)+'</p><p class="text-sm text-stone-600 mt-2">Simpan nomor ini untuk cek status pesanan.</p>'
+    +'<div class="flex flex-col gap-2 mt-6 max-w-xs mx-auto">'+(H.wa_1?'<a class="btn gold" target="_blank" rel="noopener" href="https://wa.me/'+esc(H.wa_1)+'?text='+msg+'">Konfirmasi lewat WhatsApp</a>':'')+'<a class="btn line" href="#/status">Cek status pesanan</a><a class="btn line" href="#/" data-act="donereset">Kembali ke menu</a></div></div>';
+  }
+  const items=cartItems();
+  if(!items.length) return '<h1 class="font-serif text-3xl py-4">Keranjang</h1>'+empty('Keranjang masih kosong','Pilih roti favorit Anda di beranda.')+'<div class="text-center"><a class="btn" href="#/">Lihat menu</a></div>';
+  const lead=Math.max(0,...items.map(x=>x.p.tipe==='tempahan'?Number(x.p.lead_time_hari)||0:0)), hasT=items.some(x=>x.p.tipe==='tempahan');
+  return '<h1 class="font-serif text-3xl py-4">Keranjang</h1><div class="grid gap-2">'+items.map(x=>'<div class="card flex items-center justify-between gap-2"><div class="min-w-0"><p class="font-medium truncate">'+esc(x.p.nama)+'</p><p class="text-sm text-stone-600">'+rp(x.p.harga)+' × '+x.qty+' = '+rp(x.p.harga*x.qty)+'</p></div>'+qtyCtl(x.p)+'</div>').join('')+'</div>'
+  +'<p class="text-right font-bold text-lg mt-3">Total '+rp(cartTotal())+'</p>'
+  +'<div class="flex gap-2 mt-4"><button class="chip '+(S.mode==='langsung'?'on':'')+'" data-act="mode" data-m="langsung">Pesan langsung</button><button class="chip '+(S.mode==='member'?'on':'')+'" data-act="mode" data-m="member">Pesan sebagai member</button></div>'
+  +(S.mode==='member'&&!(S.tm&&S.member)?'<div class="mt-3">'+memberBox()+'</div>':
+  '<form class="grid gap-3 mt-3" data-form="order">'+(S.mode==='member'?memberBox():'<label class="text-sm">Nama<input class="inp" name="nama" required minlength="2"></label><label class="text-sm">Nomor WhatsApp<input class="inp" name="no_wa" inputmode="tel" required placeholder="0812xxxxxxx"></label>')
+  +'<div class="grid grid-cols-2 gap-3"><label class="text-sm">Tanggal ambil<input class="inp" type="date" name="tanggal_ambil" required min="'+today(lead)+'" value="'+today(lead)+'"></label><label class="text-sm">Jam ambil<input class="inp" type="time" name="jam_ambil" required value="10:00"></label></div>'
+  +(hasT?'<label class="text-sm">Tanggal acara<input class="inp" type="date" name="tanggal_acara"></label>':'')
+  +'<label class="text-sm">Catatan (pilihan isi, tulisan di kue, dll.)<textarea class="inp" name="catatan" rows="3"></textarea></label><button class="btn" type="submit">Kirim pesanan</button></form>');
+}
+
+function viewStatus(){
+  const o=S.status;
+  return '<h1 class="font-serif text-3xl py-4">Cek status pesanan</h1><form class="grid gap-3" data-form="status"><label class="text-sm">Nomor pesanan<input class="inp" name="id_pesanan" required placeholder="PSN-261123-001"></label><label class="text-sm">Nomor WhatsApp<input class="inp" name="no_wa" inputmode="tel" required></label><button class="btn" type="submit">Cek status</button></form>'
+  +(o?'<div class="card mt-4"><div class="flex justify-between items-center"><b>'+esc(o.id_pesanan)+'</b><span class="px-3 py-1 rounded-full text-sm '+(ST_CLS[o.status]||'')+'">'+esc(o.status)+'</span></div><p class="text-sm mt-1">Ambil: '+esc(o.tanggal_ambil)+' '+esc(o.jam_ambil)+'</p><ul class="mt-2 text-sm">'+o.detail.map(d=>'<li>'+esc(d.nama_produk)+' × '+esc(d.jumlah)+'</li>').join('')+'</ul><p class="font-bold mt-2">Total '+rp(o.total)+' · '+esc(o.status_bayar)+'</p></div>':'');
+}
+
+function viewAkun(){
+  const head='<h1 class="font-serif text-3xl py-4">Akun member</h1>';
+  if(!(S.tm&&S.member)) return head+memberBox();
+  const m=S.member;
+  return head+memberBox()+'<h2 class="font-serif text-xl mt-6 mb-2">Riwayat pesanan</h2>'+(S.orders===null?skel(2):S.orders.length?S.orders.map(o=>'<div class="card mb-2"><div class="flex justify-between"><b>'+esc(o.id_pesanan)+'</b><span class="px-2 rounded-full text-xs '+(ST_CLS[o.status]||'')+'">'+esc(o.status)+'</span></div><p class="text-sm text-stone-600">'+esc(String(o.waktu_dibuat).slice(0,10))+' · '+rp(o.total)+'</p><p class="text-sm">'+o.detail.map(d=>esc(d.nama_produk)+' ×'+esc(d.jumlah)).join(', ')+'</p></div>').join(''):empty('Belum ada pesanan'))
+  +'<button class="btn line mt-4" data-act="logoutm">Keluar</button>';
+}
+
+function viewStaff(){
+  return '<div class="max-w-sm mx-auto pt-12"><h1 class="font-serif text-3xl mb-1">Masuk staf</h1><p class="text-sm text-stone-600 mb-4">Untuk admin dan kasir Noor Bakery.</p><form class="grid gap-3" data-form="staff"><label class="text-sm">Nama pengguna<input class="inp" name="nama" autocomplete="username" required></label><label class="text-sm">PIN (6 digit)<input class="inp" name="pin" type="password" inputmode="numeric" maxlength="6" autocomplete="current-password" required></label><button class="btn" type="submit">Masuk</button></form><a href="#/" class="block text-center mt-4 text-sm underline">Kembali ke beranda</a></div>';
+}
+
+/* ========== 7. DOM RENDERERS: ADMIN ========== */
+const A_TABS=[['pesanan','Pesanan'],['produk','Produk'],['pelanggan','Pelanggan'],['halaman','Halaman'],['rekap','Rekap']];
+function staffBar(title){ return '<header class="flex items-center justify-between py-4"><div><h1 class="font-serif text-2xl">'+title+'</h1><p class="text-xs text-stone-600">'+esc(S.staff?S.staff.nama:'')+'</p></div><button class="btn line sm" data-act="logouts">Keluar</button></header>'; }
+function viewAdmin(){
+  if(!S.ts||!S.staff||S.staff.role!=='admin'){ location.hash='#/staff'; return ''; }
+  const a=S.adm, d=a.data;
+  let body=skel(3);
+  if(d){
+    if(a.tab==='pesanan') body='<select class="inp mb-3" data-bind="adm.fs">'+['','Baru','Diproses','Siap','Selesai','Batal'].map(s=>'<option value="'+s+'" '+(a.fs===s?'selected':'')+'>'+(s||'Semua status')+'</option>').join('')+'</select>'
+      +(d.length?d.map(o=>'<div class="card mb-3"><div class="flex justify-between items-start"><div><b>'+esc(o.id_pesanan)+'</b> <span class="text-xs px-2 py-0.5 rounded-full bg-stone-100">'+esc(o.tipe_pesanan)+' · '+esc(o.jenis_pesan)+'</span><p class="text-sm">'+esc(o.nama_pemesan)+' · <a class="underline" target="_blank" rel="noopener" href="https://wa.me/'+esc(o.no_wa)+'">'+esc(o.no_wa)+'</a></p></div><span class="px-2 py-0.5 rounded-full text-xs '+(ST_CLS[o.status]||'')+'">'+esc(o.status)+'</span></div>'
+        +'<p class="text-sm mt-1">Ambil '+esc(o.tanggal_ambil)+' '+esc(o.jam_ambil)+(o.tanggal_acara?' · Acara '+esc(o.tanggal_acara):'')+'</p><p class="text-sm">'+o.detail.map(x=>esc(x.nama_produk)+' ×'+esc(x.jumlah)).join(', ')+'</p>'+(o.catatan?'<p class="text-sm italic">“'+esc(o.catatan)+'”</p>':'')
+        +'<p class="font-bold mt-1">'+rp(o.total)+' · '+esc(o.status_bayar)+'</p><div class="flex flex-wrap gap-1 mt-2">'+['Diproses','Siap','Selesai','Batal'].filter(s=>s!==o.status).map(s=>'<button class="chip" data-act="setst" data-id="'+o.id_pesanan+'" data-st="'+s+'">'+s+'</button>').join('')+(o.status_bayar!=='Lunas'?'<button class="chip" data-act="lunas" data-id="'+o.id_pesanan+'">Tandai lunas</button>':'')+'</div></div>').join(''):empty('Belum ada pesanan'));
+    if(a.tab==='produk') body='<button class="btn gold mb-3" data-act="editprod" data-id="">+ Produk baru</button>'+(d.length?d.map(p=>'<div class="card mb-2 flex justify-between items-center gap-2"><div class="min-w-0"><p class="font-medium truncate">'+esc(p.nama)+(String(p.aktif)==='true'||p.aktif===true?'':' <span class="text-xs text-red-700">(nonaktif)</span>')+'</p><p class="text-sm text-stone-600">'+esc(p.kategori)+' · '+rp(p.harga)+' · '+(p.tipe==='ready'?'stok '+esc(p.stok):'tempahan')+'</p></div><button class="btn line sm" data-act="editprod" data-id="'+p.id_produk+'">Ubah</button></div>').join(''):empty('Belum ada produk'));
+    if(a.tab==='pelanggan') body='<input class="inp mb-3" placeholder="Cari nama atau nomor WA" data-bind="adm.q" value="'+esc(a.q)+'">'+(d.length?d.map(c=>'<div class="card mb-2 flex justify-between items-center gap-2"><div class="min-w-0"><p class="font-medium">'+esc(c.nama)+' <span class="text-xs px-2 rounded-full '+(c.tipe==='member'?'bg-green-100 text-green-800':'bg-stone-100')+'">'+esc(c.tipe)+'</span></p><p class="text-sm text-stone-600">'+esc(c.no_wa)+' · '+esc(c.total_pesanan)+' pesanan · '+rp(c.total_belanja)+'</p></div><button class="btn line sm" data-act="editcust" data-id="'+c.id_pelanggan+'">Ubah</button></div>').join(''):empty('Pelanggan tidak ditemukan'));
+    if(a.tab==='halaman') body='<form data-form="halaman" class="grid gap-3">'+d.halaman.map(h=>'<div class="card"><div class="flex justify-between"><b class="text-sm">'+esc(h.kunci)+'</b><label class="text-xs flex items-center gap-1"><input type="checkbox" data-k="'+esc(h.kunci)+'" data-f="t" '+(String(h.tampil)==='true'||h.tampil===true?'checked':'')+'> tampil</label></div><textarea class="inp mt-1" rows="2" data-k="'+esc(h.kunci)+'" data-f="v">'+esc(h.nilai)+'</textarea></div>').join('')+'<button class="btn" type="submit">Simpan halaman</button></form>';
+    if(a.tab==='rekap') body='<input type="date" class="inp mb-3" data-bind="adm.tgl" value="'+a.tgl+'"><div class="grid grid-cols-2 gap-3"><div class="card"><p class="text-sm">Omzet total</p><p class="font-bold text-xl">'+rp(d.omzet_total)+'</p></div><div class="card"><p class="text-sm">Pesanan online</p><p class="font-bold text-xl">'+d.pesanan_online+'</p><p class="text-xs">'+rp(d.omzet_online)+'</p></div><div class="card"><p class="text-sm">Transaksi toko</p><p class="font-bold text-xl">'+d.transaksi_toko+'</p><p class="text-xs">'+rp(d.omzet_toko)+'</p></div><div class="card"><p class="text-sm">Per metode</p>'+(Object.keys(d.per_metode_toko).map(k=>'<p class="text-xs">'+esc(k)+': '+rp(d.per_metode_toko[k])+'</p>').join('')||'<p class="text-xs">-</p>')+'</div></div><h2 class="font-bold mt-4 mb-1">Stok menipis</h2>'+(d.stok_menipis.length?d.stok_menipis.map(s=>'<p class="text-sm">'+esc(s.nama)+': '+s.stok+'</p>').join(''):'<p class="text-sm text-stone-600">Aman.</p>');
+  }
+  return staffBar('Panel admin')+'<div class="flex gap-2 overflow-x-auto pb-3">'+A_TABS.map(t=>'<button class="chip '+(a.tab===t[0]?'on':'')+'" data-act="atab" data-t="'+t[0]+'">'+t[1]+'</button>').join('')+'</div>'+body;
+}
+async function loadAdmin(){
+  const a=S.adm; a.data=null; render();
+  try{
+    if(a.tab==='pesanan') a.data=await api('listPesanan',{status:a.fs},'s');
+    if(a.tab==='produk') a.data=await api('listProduk',{},'s');
+    if(a.tab==='pelanggan') a.data=await api('listPelanggan',{q:a.q},'s');
+    if(a.tab==='halaman') a.data=(await api('getAdminHalaman',{},'s'));
+    if(a.tab==='halaman') a.data={halaman:a.data.halaman};
+    if(a.tab==='rekap') a.data=await api('rekapHarian',{tanggal:a.tgl},'s');
+  }catch(e){ toast(e.message,'err'); a.data=a.tab==='rekap'||a.tab==='halaman'?null:[]; }
+  render();
+}
+function prodForm(p){
+  p=p||{tipe:'ready',aktif:true,satuan:'pcs',min_order:1,lead_time_hari:0,stok:0,harga:0};
+  const f=(l,n,t,x)=>'<label class="text-sm">'+l+'<input class="inp" name="'+n+'" type="'+(t||'text')+'" value="'+esc(p[n]??'')+'" '+(x||'')+'></label>';
+  modal('<h2 class="font-serif text-xl mb-3">'+(p.id_produk?'Ubah produk':'Produk baru')+'</h2><form class="grid gap-3" data-form="prod"><input type="hidden" name="id_produk" value="'+esc(p.id_produk||'')+'">'
+  +f('Nama','nama','text','required')+f('Kategori','kategori')+f('Harga','harga','number','min="0" required')
+  +'<label class="text-sm">Tipe<select class="inp" name="tipe"><option value="ready" '+(p.tipe==='ready'?'selected':'')+'>Ready (stok harian)</option><option value="tempahan" '+(p.tipe==='tempahan'?'selected':'')+'>Tempahan (pre-order)</option></select></label>'
+  +f('Stok (untuk ready)','stok','number','min="0"')+'<div class="grid grid-cols-3 gap-2">'+f('Min order','min_order','number','min="1"')+f('Lead time (hari)','lead_time_hari','number','min="0"')+f('Satuan','satuan')+'</div>'
+  +f('Link foto (Google Drive/URL)','foto_url')+'<label class="text-sm">Deskripsi<textarea class="inp" name="deskripsi" rows="2">'+esc(p.deskripsi||'')+'</textarea></label>'+f('Opsi isi (tempahan)','opsi_isi')
+  +'<label class="flex items-center gap-2 text-sm"><input type="checkbox" name="unggulan" '+(p.unggulan===true||String(p.unggulan)==='true'?'checked':'')+'> Unggulan</label><label class="flex items-center gap-2 text-sm"><input type="checkbox" name="aktif" '+(p.aktif===true||String(p.aktif)==='true'?'checked':'')+'> Aktif (tampil di toko)</label>'
+  +'<div class="flex gap-2 justify-end"><button type="button" class="btn line sm" data-act="mclose">Batal</button><button class="btn sm" type="submit">Simpan</button></div></form>');
+}
+function custForm(c){
+  modal('<h2 class="font-serif text-xl mb-3">Ubah pelanggan</h2><form class="grid gap-3" data-form="cust"><input type="hidden" name="id_pelanggan" value="'+esc(c.id_pelanggan)+'"><label class="text-sm">Nama<input class="inp" name="nama" value="'+esc(c.nama)+'" required></label><label class="text-sm">Nomor WA<input class="inp" name="no_wa" value="'+esc(c.no_wa)+'" required></label><label class="text-sm">Alamat<input class="inp" name="alamat" value="'+esc(c.alamat)+'"></label><label class="text-sm">Catatan<textarea class="inp" name="catatan" rows="2">'+esc(c.catatan)+'</textarea></label><label class="text-sm">Status<select class="inp" name="status"><option value="aktif" '+(c.status==='aktif'?'selected':'')+'>Aktif</option><option value="blokir" '+(c.status==='blokir'?'selected':'')+'>Blokir</option></select></label><div class="flex gap-2 justify-end"><button type="button" class="btn line sm" data-act="mclose">Batal</button><button class="btn sm" type="submit">Simpan</button></div></form>');
+}
+
+/* ========== 8. DOM RENDERERS: POS KASIR ========== */
+const posItems = () => Object.keys(S.pos.cart).map(id=>({p:(S.pos.list||[]).find(x=>x.id_produk===id),qty:S.pos.cart[id]})).filter(x=>x.p);
+const posSub = () => posItems().reduce((a,x)=>a+x.qty*Number(x.p.harga),0);
+const posTotal = () => Math.max(0,posSub()-Number(S.pos.diskon||0));
+function viewPos(){
+  if(!S.ts||!S.staff){ location.hash='#/staff'; return ''; }
+  const o=S.pos, tabs='<div class="flex gap-2 mb-3"><button class="chip '+(o.tab==='kasir'?'on':'')+'" data-act="ptab" data-t="kasir">Kasir</button><button class="chip '+(o.tab==='riwayat'?'on':'')+'" data-act="ptab" data-t="riwayat">Riwayat hari ini</button></div>';
+  if(o.tab==='riwayat') return staffBar('Kasir')+tabs+(o.riwayat===null?skel(3):o.riwayat.length?o.riwayat.map(t=>'<div class="card mb-2"><div class="flex justify-between"><b>'+esc(t.id_transaksi)+'</b><span class="text-sm">'+esc(String(t.waktu).slice(11,16))+' · '+esc(t.metode_bayar)+'</span></div><p class="text-sm">'+t.detail.map(d=>esc(d.nama_produk)+' ×'+esc(d.jumlah)).join(', ')+'</p><p class="font-bold">'+rp(t.total)+(t.status==='batal'?' <span class="text-red-700 text-sm">(batal)</span>':'')+'</p></div>').join(''):empty('Belum ada transaksi hari ini'));
+  const q=o.q.toLowerCase(), list=o.list===null?null:o.list.filter(p=>!q||p.nama.toLowerCase().includes(q)||String(p.kategori).toLowerCase().includes(q));
+  const cnt=posItems().reduce((a,x)=>a+x.qty,0);
+  return staffBar('Kasir')+tabs+'<input class="inp mb-3" placeholder="Cari produk" data-bind="pos.q" value="'+esc(o.q)+'">'
+   +(list===null?skel(4):list.length?'<div class="grid grid-cols-2 sm:grid-cols-3 gap-2">'+list.map(p=>{const hab=p.tipe==='ready'&&Number(p.stok)<=0;return '<button class="card text-left active:scale-95 '+(hab?'opacity-50':'')+'" '+(hab?'disabled':'')+' data-act="padd" data-id="'+p.id_produk+'" data-d="1"><p class="font-medium leading-tight">'+esc(p.nama)+'</p><p class="text-brown font-bold">'+rp(p.harga)+'</p><p class="text-xs text-stone-500">'+(p.tipe==='ready'?'stok '+esc(p.stok):'tempahan')+(o.cart[p.id_produk]?' · <b>'+o.cart[p.id_produk]+' di keranjang</b>':'')+'</p></button>';}).join('')+'</div>':empty('Produk tidak ditemukan'))
+   +'<div class="fixed left-0 right-0 bottom-0 bg-brown text-cream p-3 flex items-center justify-between gap-3" style="padding-bottom:calc(.75rem + env(safe-area-inset-bottom,0px))"><div><p class="text-sm">'+cnt+' item</p><p class="font-bold text-lg">'+rp(posSub())+'</p></div><button class="btn gold" '+(cnt?'':'disabled')+' data-act="ppay">Bayar</button></div>';
+}
+function payModal(){
+  const o=S.pos, its=posItems();
+  modal('<h2 class="font-serif text-xl mb-2">Pembayaran</h2><div class="grid gap-1 mb-3">'+its.map(x=>'<div class="flex items-center justify-between text-sm"><span class="truncate">'+esc(x.p.nama)+'</span><span class="flex items-center gap-2"><button class="chip" data-act="padd" data-id="'+x.p.id_produk+'" data-d="-1" data-modal="1">−</button>'+x.qty+'<button class="chip" data-act="padd" data-id="'+x.p.id_produk+'" data-d="1" data-modal="1">+</button><b class="w-20 text-right">'+rp(x.qty*x.p.harga)+'</b></span></div>').join('')+'</div>'
+  +'<div class="grid gap-3"><div class="flex gap-2"><input class="inp" id="cwa" placeholder="No. WA member (opsional)" inputmode="tel" value="'+esc(o.cust?o.cust.no_wa:'')+'"><button class="btn line sm" data-act="pcust">Cari</button></div>'+(o.cust?'<p class="text-sm text-green-800">Member: '+esc(o.cust.nama)+'</p>':'')
+  +'<div class="flex gap-2">'+['Tunai','QRIS','Transfer'].map(m=>'<button class="chip '+(o.metode===m?'on':'')+'" data-act="pmet" data-m="'+m+'">'+m+'</button>').join('')+'</div>'
+  +'<label class="text-sm">Diskon (Rp)<input class="inp" type="number" min="0" data-bind="pos.diskon" value="'+(o.diskon||0)+'"></label>'
+  +(o.metode==='Tunai'?'<label class="text-sm">Uang diterima<input class="inp" type="number" min="0" data-bind="pos.diterima" value="'+(o.diterima||'')+'"></label><div class="flex gap-2 flex-wrap"><button class="chip" data-act="pquick" data-v="exact">Uang pas</button>'+[10000,20000,50000,100000].map(v=>'<button class="chip" data-act="pquick" data-v="'+v+'">'+(v/1000)+'rb</button>').join('')+'</div>':'')
+  +'<div class="card"><div class="flex justify-between"><span>Total</span><b id="ptotal">'+rp(posTotal())+'</b></div>'+(o.metode==='Tunai'?'<div class="flex justify-between"><span>Kembalian</span><b id="pkemb"></b></div>':'')+'</div>'
+  +'<div class="flex gap-2 justify-end"><button class="btn line sm" data-act="mclose">Tutup</button><button class="btn sm" data-act="psubmit">Simpan transaksi</button></div></div>');
+  calcKemb();
+}
+function calcKemb(){ const k=$('#pkemb'); if(k){ const d=Number(S.pos.diterima||0)-posTotal(); k.textContent=d<0?'Kurang '+rp(-d):rp(d); } const t=$('#ptotal'); if(t) t.textContent=rp(posTotal()); }
+function strukModal(t){
+  modal('<div class="struk bg-white p-3 rounded-xl font-mono text-sm"><p class="text-center font-bold">'+esc(t.nama_toko)+'</p><p class="text-center text-xs">'+esc(t.waktu)+'<br>'+esc(t.id_transaksi)+' · '+esc(t.kasir)+'</p><hr class="my-2">'
+  +t.items.map(i=>'<div>'+esc(i.nama)+'<div class="flex justify-between"><span>'+i.jumlah+' × '+rp(i.harga)+'</span><span>'+rp(i.subtotal)+'</span></div></div>').join('')
+  +'<hr class="my-2"><div class="flex justify-between"><span>Subtotal</span><span>'+rp(t.subtotal)+'</span></div>'+(t.diskon?'<div class="flex justify-between"><span>Diskon</span><span>-'+rp(t.diskon)+'</span></div>':'')
+  +'<div class="flex justify-between font-bold"><span>Total</span><span>'+rp(t.total)+'</span></div><div class="flex justify-between"><span>'+esc(t.metode_bayar)+'</span><span>'+rp(t.uang_diterima)+'</span></div><div class="flex justify-between"><span>Kembali</span><span>'+rp(t.kembalian)+'</span></div><p class="text-center text-xs mt-2">'+esc(t.catatan_struk)+'</p></div>'
+  +'<div class="flex gap-2 justify-end mt-3"><button class="btn line sm" data-act="mclose">Selesai</button><button class="btn sm" data-act="print">Cetak struk</button></div>');
+}
+
+/* ========== 9. NAVIGASI & RENDER UTAMA ========== */
+const VIEWS = { home:viewHome, pesan:viewPesan, status:viewStatus, akun:viewAkun, staff:viewStaff, admin:viewAdmin, pos:viewPos };
+function navHtml(){
+  if(!['home','pesan','status','akun'].includes(S.view)) return '';
+  const it=[['home','#/','Beranda','🏠'],['pesan','#/pesan','Keranjang','🛒'],['status','#/status','Status','📦'],['akun','#/akun','Akun','👤']];
+  return '<div class="fixed bottom-0 left-0 right-0 bg-white border-t border-[#EBD7B5] z-40" style="padding-bottom:env(safe-area-inset-bottom,0px)"><div class="max-w-3xl mx-auto grid grid-cols-4">'+it.map(x=>'<a href="'+x[1]+'" class="py-2 text-center text-xs '+(S.view===x[0]?'text-brown font-bold':'text-stone-500')+'"><div class="text-xl relative inline-block">'+x[3]+(x[0]==='pesan'&&cartCount()?'<span class="absolute -top-1 -right-3 bg-gold text-ink rounded-full text-[10px] px-1.5 font-bold">'+cartCount()+'</span>':'')+'</div><div>'+x[2]+'</div></a>').join('')+'</div></div>';
+}
+function render(){
+  const y=scrollY, v=VIEWS[S.view]||viewHome;
+  $('#app').innerHTML=v(); $('#nav').innerHTML=navHtml(); scrollTo(0,y); renderG();
+}
+function renderG(){
+  const el=$('#gbtn'); if(!el||!window.google||!google.accounts||!S.pub) return;
+  if(!S.pub.google_client_id){ el.innerHTML='<p class="text-sm text-red-700">Login Google belum diaktifkan oleh toko.</p>'; return; }
+  google.accounts.id.initialize({client_id:S.pub.google_client_id,callback:onGoogle});
+  google.accounts.id.renderButton(el,{theme:'outline',size:'large',text:'continue_with',width:260});
+}
+async function route(){
+  const v=(location.hash.replace(/^#\/?/,'')||'home').split('/')[0];
+  if(v==='menu'){ S.view='home'; render(); document.getElementById('menu')&&document.getElementById('menu').scrollIntoView(); return; }
+  S.view=VIEWS[v]?v:'home'; render();
+  if(S.view==='akun'&&S.tm&&S.orders===null) loadOrders();
+  if(S.view==='admin'&&S.ts&&S.adm.data===null) loadAdmin();
+  if(S.view==='pos'&&S.ts&&S.pos.list===null) loadPos();
+}
+async function loadOrders(){ try{ S.orders=await api('memberOrders',{},'m'); }catch(e){ S.orders=[]; toast(e.message,'err'); } render(); }
+async function loadPos(){ try{ S.pos.list=await api('posProduk',{},'s'); }catch(e){ S.pos.list=[]; toast(e.message,'err'); } render(); }
+function logoutStaff(silent){ S.ts=''; S.staff=null; ls.set('ts',''); ls.set('staff',null); S.adm.data=null; S.pos.list=null; if(!silent) toast('Anda sudah keluar'); location.hash='#/staff'; }
+function logoutMember(silent){ S.tm=''; S.member=null; S.orders=null; ls.set('tm',''); ls.set('member',null); if(!silent) toast('Anda sudah keluar'); render(); }
+function saveMember(r){ S.tm=r.token; S.member=r.profil; S.reg=null; ls.set('tm',S.tm); ls.set('member',S.member); }
+async function onGoogle(resp){
+  S.gtok=resp.credential;
+  try{
+    const r=await api('loginGoogle',{id_token:S.gtok});
+    if(r.registered){ saveMember(r); S.orders=null; toast('Selamat datang, '+r.profil.nama); if(S.view==='akun') loadOrders(); } else S.reg={email:r.email,nama:r.nama};
+    render();
+  }catch(e){ toast(e.message,'err'); }
+}
+
+/* ========== 10. EVENT LISTENERS ========== */
+function setPath(path, val){ const [a,b]=path.split('.'); S[a][b]=val; }
+const ACT = {
+  reload(){ S.err=''; boot(); },
+  goto(t){ event.preventDefault(); document.getElementById(t.dataset.to).scrollIntoView({behavior:'smooth'}); },
+  cat(t){ S.cat=t.dataset.c; render(); },
+  cart(t){ addCart(t.dataset.id, Number(t.dataset.d)); },
+  mode(t){ S.mode=t.dataset.m; render(); },
+  donereset(){ S.done=null; },
+  logoutm(){ logoutMember(); },
+  logouts(){ logoutStaff(); },
+  mclose(){ closeModal(); },
+  mbg(t){ if(event.target===t) closeModal(); },
+  ask(t){ closeModal(); if(window._ask) window._ask(t.dataset.v==='1'); },
+  atab(t){ S.adm.tab=t.dataset.t; loadAdmin(); },
+  setst(t){ busy(t,async()=>{ if(t.dataset.st==='Batal' && !(await ask('Batalkan pesanan '+t.dataset.id+'? Stok akan dikembalikan.','Ya, batalkan'))) return; await api('updatePesanan',{id_pesanan:t.dataset.id,status:t.dataset.st},'s'); toast('Status diperbarui'); loadAdmin(); },'...'); },
+  lunas(t){ busy(t,async()=>{ await api('updatePesanan',{id_pesanan:t.dataset.id,status_bayar:'Lunas'},'s'); toast('Ditandai lunas'); loadAdmin(); },'...'); },
+  editprod(t){ prodForm(t.dataset.id?S.adm.data.find(p=>p.id_produk===t.dataset.id):null); },
+  editcust(t){ custForm(S.adm.data.find(c=>c.id_pelanggan===t.dataset.id)); },
+  ptab(t){ S.pos.tab=t.dataset.t; if(S.pos.tab==='riwayat'){ S.pos.riwayat=null; render(); api('posRiwayat',{tanggal:today()},'s').then(r=>{S.pos.riwayat=r;render();}).catch(e=>toast(e.message,'err')); } else render(); },
+  padd(t){
+    const id=t.dataset.id, d=Number(t.dataset.d), p=S.pos.list.find(x=>x.id_produk===id), q=(S.pos.cart[id]||0)+d;
+    if(p.tipe==='ready'&&q>Number(p.stok)){ toast('Stok '+p.nama+' tinggal '+p.stok,'err'); return; }
+    if(q<=0) delete S.pos.cart[id]; else S.pos.cart[id]=q;
+    render(); if(t.dataset.modal){ if(posItems().length) payModal(); else closeModal(); }
+  },
+  ppay(){ S.pos.diterima=0; payModal(); },
+  pmet(t){ S.pos.metode=t.dataset.m; payModal(); },
+  pquick(t){ S.pos.diterima=t.dataset.v==='exact'?posTotal():Number(t.dataset.v); payModal(); },
+  pcust(t){ busy(t,async()=>{ const r=await api('posCariMember',{no_wa:$('#cwa').value},'s'); S.pos.cust=r; if(!r) toast('Member tidak ditemukan','err'); payModal(); },'...'); },
+  psubmit(t){ busy(t,async()=>{
+    const o=S.pos, r=await api('posCreateTransaksi',{items:posItems().map(x=>({id_produk:x.p.id_produk,jumlah:x.qty})),metode_bayar:o.metode,diskon:Number(o.diskon||0),uang_diterima:Number(o.diterima||0),id_pelanggan:o.cust?o.cust.id_pelanggan:''},'s');
+    o.cart={}; o.cust=null; o.diskon=0; o.diterima=0; o.list=null; strukModal(r); toast('Transaksi tersimpan'); loadPos();
+  },'Menyimpan...'); },
+  print(){ window.print(); }
+};
+document.addEventListener('click', e=>{ const t=e.target.closest('[data-act]'); if(t&&ACT[t.dataset.act]){ window.event=e; ACT[t.dataset.act](t); } });
+document.addEventListener('input', e=>{
+  const b=e.target.dataset.bind; if(!b) return;
+  if(b==='pos.diskon'||b==='pos.diterima'){ setPath(b,Number(e.target.value||0)); calcKemb(); return; }
+  setPath(b,e.target.value);
+  if(b==='adm.fs'||b==='adm.tgl'){ loadAdmin(); }
+  else if(b==='adm.q'){ clearTimeout(window._qt); window._qt=setTimeout(async()=>{ try{ S.adm.data=await api('listPelanggan',{q:S.adm.q},'s'); const el=document.activeElement, pos=el.selectionStart; render(); const n=document.querySelector('[data-bind="adm.q"]'); n.focus(); n.setSelectionRange(pos,pos); }catch(x){ toast(x.message,'err'); } },400); }
+  else if(b==='pos.q'){ const el=e.target, p=el.selectionStart; render(); const n=document.querySelector('[data-bind="pos.q"]'); n.focus(); n.setSelectionRange(p,p); }
+});
+const FORMS = {
+  order(f,btn){ return busy(btn,async()=>{
+    const v=fd(f), p={jenis_pesan:S.mode,nama:v.nama,no_wa:v.no_wa,tanggal_ambil:v.tanggal_ambil,jam_ambil:v.jam_ambil,tanggal_acara:v.tanggal_acara||'',catatan:v.catatan||'',items:cartItems().map(x=>({id_produk:x.p.id_produk,jumlah:x.qty}))};
+    const r=await api('createOrder',p,S.mode==='member'?'m':''); S.done=r; S.cart={}; ls.set('cart',{}); S.pub=await getPublic(); render(); scrollTo(0,0);
+  },'Mengirim...'); },
+  status(f,btn){ return busy(btn,async()=>{ const v=fd(f); S.status=await api('getOrderStatus',{id_pesanan:v.id_pesanan,no_wa:v.no_wa}); render(); },'Mencari...'); },
+  register(f,btn){ return busy(btn,async()=>{ const v=fd(f); const r=await api('registerMember',{id_token:S.gtok,nama:v.nama,no_wa:v.no_wa,alamat:v.alamat}); saveMember(r); S.orders=null; toast('Pendaftaran berhasil'); render(); if(S.view==='akun') loadOrders(); },'Mendaftar...'); },
+  staff(f,btn){ return busy(btn,async()=>{ const v=fd(f); const r=await api('loginStaff',{nama:v.nama,pin:v.pin}); S.ts=r.token; S.staff=r.user; ls.set('ts',S.ts); ls.set('staff',S.staff); S.adm.data=null; S.pos.list=null; location.hash=r.user.role==='admin'?'#/admin':'#/pos'; },'Masuk...'); },
+  prod(f,btn){ return busy(btn,async()=>{
+    const v=fd(f), d={id_produk:v.id_produk||undefined,nama:v.nama,kategori:v.kategori,harga:Number(v.harga),tipe:v.tipe,stok:Number(v.stok||0),min_order:Number(v.min_order||1),lead_time_hari:Number(v.lead_time_hari||0),satuan:v.satuan,foto_url:v.foto_url,deskripsi:v.deskripsi,opsi_isi:v.opsi_isi,unggulan:!!v.unggulan,aktif:!!v.aktif};
+    await api('saveProduk',{data:d},'s'); closeModal(); toast('Produk disimpan'); S.pub=await getPublic(); loadAdmin();
+  }); },
+  cust(f,btn){ return busy(btn,async()=>{ await api('savePelanggan',{data:fd(f)},'s'); closeModal(); toast('Pelanggan disimpan'); loadAdmin(); }); },
+  halaman(f,btn){ return busy(btn,async()=>{
+    const items=S.adm.data.halaman.map(h=>({kunci:h.kunci,nilai:f.querySelector('textarea[data-k="'+h.kunci+'"]').value,tampil:f.querySelector('input[data-k="'+h.kunci+'"]').checked}));
+    await api('saveHalaman',{items},'s'); toast('Halaman disimpan'); S.pub=await getPublic(); S.adm.data=null; loadAdmin();
+  }); }
+};
+document.addEventListener('submit', e=>{ const f=e.target.closest('form[data-form]'); if(!f) return; e.preventDefault(); const btn=f.querySelector('button[type=submit]'); if(btn&&!btn.disabled&&FORMS[f.dataset.form]) FORMS[f.dataset.form](f,btn); });
+window.addEventListener('hashchange', route);
+
+/* ========== 11. BOOT ========== */
+async function boot(){
+  render();
+  try{ S.pub=await getPublic(); S.err=''; }catch(e){ S.err='Tidak bisa memuat data toko: '+e.message; }
+  route();
+}
+boot();
+</script>
+</body>
+</html>
