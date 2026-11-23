@@ -22,6 +22,9 @@ body{background:#FFF7E6;color:#2B1A10;padding-bottom:env(safe-area-inset-bottom,
 .sk{background:linear-gradient(90deg,#f1e2c4,#fbf0da,#f1e2c4);background-size:200% 100%;animation:sk 1.2s infinite;border-radius:16px}@keyframes sk{to{background-position:-200% 0}}
 @media(prefers-reduced-motion:reduce){.sk{animation:none}}
 :focus-visible{outline:3px solid #F0A93A;outline-offset:2px}
+.navcap{position:fixed;left:50%;bottom:calc(14px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);width:min(92vw,400px);z-index:40;transition:transform .3s ease,opacity .3s ease}
+.navcap.hide{transform:translate(-50%,160%);opacity:0;pointer-events:none}
+@media(prefers-reduced-motion:reduce){.navcap{transition:none}}
 @media print{body *{visibility:hidden}.struk,.struk *{visibility:visible}.struk{position:absolute;left:0;top:0;width:58mm;font-size:11px}}
 </style>
 </head>
@@ -255,7 +258,9 @@ const VIEWS = { home:viewHome, pesan:viewPesan, status:viewStatus, akun:viewAkun
 function navHtml(){
   if(!['home','pesan','status','akun'].includes(S.view)) return '';
   const it=[['home','#/','Beranda','🏠'],['pesan','#/pesan','Keranjang','🛒'],['status','#/status','Status','📦'],['akun','#/akun','Akun','👤']];
-  return '<div class="fixed bottom-0 left-0 right-0 bg-white border-t border-[#EBD7B5] z-40" style="padding-bottom:env(safe-area-inset-bottom,0px)"><div class="max-w-3xl mx-auto grid grid-cols-4">'+it.map(x=>'<a href="'+x[1]+'" class="py-2 text-center text-xs '+(S.view===x[0]?'text-brown font-bold':'text-stone-500')+'"><div class="text-xl relative inline-block">'+x[3]+(x[0]==='pesan'&&cartCount()?'<span class="absolute -top-1 -right-3 bg-gold text-ink rounded-full text-[10px] px-1.5 font-bold">'+cartCount()+'</span>':'')+'</div><div>'+x[2]+'</div></a>').join('')+'</div></div>';
+  return '<div id="navcap" class="navcap'+(S.navHide?' hide':'')+'"><div class="flex items-center justify-between gap-1 rounded-full bg-brown/95 backdrop-blur p-1.5 shadow-xl shadow-black/25">'
+  +it.map(x=>{const on=S.view===x[0];return '<a href="'+x[1]+'" aria-label="'+x[2]+'"'+(on?' aria-current="page"':'')+' class="flex-1 flex items-center justify-center gap-1.5 rounded-full py-2.5 text-sm font-bold transition-colors '+(on?'bg-gold text-ink':'text-cream')+'"><span class="relative text-lg leading-none">'+x[3]+(x[0]==='pesan'&&cartCount()?'<span class="absolute -top-2 -right-3 bg-gold text-ink rounded-full text-[10px] px-1.5 font-bold ring-2 ring-brown">'+cartCount()+'</span>':'')+'</span>'+(on?'<span>'+x[2]+'</span>':'')+'</a>';}).join('')
+  +'</div></div>';
 }
 function render(){
   const y=scrollY, v=VIEWS[S.view]||viewHome;
@@ -308,7 +313,7 @@ const ACT = {
   lunas(t){ busy(t,async()=>{ await api('updatePesanan',{id_pesanan:t.dataset.id,status_bayar:'Lunas'},'s'); toast('Ditandai lunas'); loadAdmin(); },'...'); },
   editprod(t){ prodForm(t.dataset.id?S.adm.data.find(p=>p.id_produk===t.dataset.id):null); },
   editcust(t){ custForm(S.adm.data.find(c=>c.id_pelanggan===t.dataset.id)); },
-  ptab(t){ S.pos.tab=t.dataset.t; if(S.pos.tab==='riwayat'){ S.pos.riwayat=null; render(); api('posRiwayat',{tanggal:today()},'s').then(r=>{S.pos.riwayat=r;render();}).catch(e=>toast(e.message,'err')); } else render(); },
+  ptab(t){ S.pos.tab=t.dataset.t; if(S.pos.tab==='riwayat'){ S.pos.riwayat=null; render(); api('posRiwayat',{},'s').then(r=>{S.pos.riwayat=r;render();}).catch(e=>toast(e.message,'err')); } else render(); },
   padd(t){
     const id=t.dataset.id, d=Number(t.dataset.d), p=S.pos.list.find(x=>x.id_produk===id), q=(S.pos.cart[id]||0)+d;
     if(p.tipe==='ready'&&q>Number(p.stok)){ toast('Stok '+p.nama+' tinggal '+p.stok,'err'); return; }
@@ -353,6 +358,18 @@ const FORMS = {
   }); }
 };
 document.addEventListener('submit', e=>{ const f=e.target.closest('form[data-form]'); if(!f) return; e.preventDefault(); const btn=f.querySelector('button[type=submit]'); if(btn&&!btn.disabled&&FORMS[f.dataset.form]) FORMS[f.dataset.form](f,btn); });
+let lastY=0,tick_=false;
+window.addEventListener('scroll',()=>{
+  if(tick_) return; tick_=true;
+  requestAnimationFrame(()=>{
+    const y=Math.max(0,scrollY), nearEnd=innerHeight+y>=document.documentElement.scrollHeight-8;
+    let hide=S.navHide;
+    if(y<80||nearEnd) hide=false; else if(y>lastY+6) hide=true; else if(y<lastY-6) hide=false;
+    lastY=y;
+    if(hide!==S.navHide){ S.navHide=hide; const el=$('#navcap'); if(el) el.classList.toggle('hide',hide); }
+    tick_=false;
+  });
+},{passive:true});
 window.addEventListener('hashchange', route);
 
 /* ========== 11. BOOT ========== */
